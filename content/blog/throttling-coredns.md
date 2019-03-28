@@ -39,21 +39,22 @@ being `OOMkilled` in case of a burst of incoming queries.
 ## Testing CoreDNS memory usage
 
 To test the `throttle` plugin and show the difference in memory consumption of CoreDNS with and without the `throttle` plugin,
-a Kubernetes cluster was set up with one replica of CoreDNS running in the Master node. The memory limit of the CoreDNS container was set
+I set up a Kubernetes cluster with one replica of CoreDNS running in the Master node. I set the memory limit of the CoreDNS container
 to 1700Mi to help capture the memory consumption in case CoreDNS crashes due to it being `OOMkilled`.
 
-To provide a burst of incoming queries, [a simple tool for stressing CoreDNS](https://github.com/mikkeloscar/go-dnsperf) was used.
-The tool spins up DNS client replicas which queries a set of DNS names to resolve.
+To provide a burst of incoming queries, I used a [a simple tool for stressing CoreDNS](https://github.com/mikkeloscar/go-dnsperf).
+The tool spins up DNS client replicas which queries a set of DNS names to resolve. One of the reasons I used this tool is because it appends search domains from /etc/resolv.conf. 
+With the Kubernetes "search-path/ndots:5" situation, this multiplies the actual number of queries being sent by a large amount (X4-5).
 
-Each DNS replica queries at a rate of 100 qps(queries per second), with each querying for both A and AAAA records.
+For this test, I had set up each DNS replica queries at a rate of 100 qps(queries per second), with each querying for both A and AAAA records.
 Hence, a single replica would request a total of (100 qps x2 records = ) 200 qps.
-To provide an high incoming query burst, the test had 150 DNS client replicas spun up
-which in total would result in a total incoming request of (200 x 150 = ) 30k qps to CoreDNS.
+To provide an high incoming query burst, I set up the test to spin up 150 DNS client replicas
+which in total resulted in a total incoming request of (200 x 150 = ) 30k qps to CoreDNS.
 
-The Configuration used to test is the default as of Kubernetes v1.14 with the exception that the [`erratic` plugin](https://coredns.io/plugins/erratic/) was used 
+The Configuration I used to test is the default as of Kubernetes v1.14 with the exception that I used the [`erratic` plugin](https://coredns.io/plugins/erratic/)
 instead of the `forward` plugin to overcome any Network shortcomings.
 
-The CoreDNS Configuration used is as follows: 
+The CoreDNS Configuration I used is as follows: 
 ```corefile
  .:53 {
         errors
@@ -93,14 +94,14 @@ that was captured before the crash is 1.655 GiB.
 ~~~ 
 
 It is worth noting that the amount of memory consumed by CoreDNS is proportional to the number of `goroutines`. 
-The metrics captured for the memory comsumption and the number of `goroutines`: 
+The metrics captured for the memory consumption and the number of `goroutines`: 
 
 ![no-throttle-memory](https://user-images.githubusercontent.com/30265084/55086273-7923c700-507e-11e9-8735-ff18d407c40c.png)
 
 
 ### Memory consumption of CoreDNS using the `throttle` plugin
 
-The same scenario was tested with the `throttle` plugin enabled. 
+I tested the same scenario with the `throttle` plugin enabled. 
 Example usage of `throttle` in the CoreDNS Corefile configuration:
 
 ~~~ corefile
@@ -109,7 +110,7 @@ Example usage of `throttle` in the CoreDNS Corefile configuration:
 }
 ~~~
 
-The test was done for three different values for the `max-inflight-queries`, where it was set to 100, 500 and 1000
+I had tested for three different values for the `max-inflight-queries`, where it was set to 100, 500 and 1000
 to see the memory consumption in each of the cases.
 
 In this test, the base memory used by CoreDNS when there are no incoming queries is 20MiB. 
@@ -139,3 +140,14 @@ Below is a snippet of the metrics of CoreDNS memory and metrics from the `thrott
 #### Throttle `max-inflight-queries` at 1000 
 
 ![throttle-1k](https://user-images.githubusercontent.com/30265084/55090063-d753a880-5084-11e9-9bf4-9129f839f49f.png)
+
+
+## Conclusion
+
+When there is a sudden burst of incoming queries, CoreDNS spins up a large amount of concurrent `goroutines` to process all the incoming queries.
+This results is a massive increase in memory consumed by CoreDNS.
+As a result, from a Kubernetes perspective, this can result in CoreDNS to be `OOMKilled` due to crossing the memory limits set in the deployment.
+
+To overcome this issue, as I have demonstrated above, the `throttle` plugin can be used to limit the impact of the burst of incoming queries to CoreDNS
+by throttling the number of simultaneous inflight queries. This results in significantly less memory consumed by CoreDNS and ensure that CoreDNS does not crash
+and continues to perform as expected.
